@@ -87,7 +87,7 @@ def _init_otel(settings: Settings) -> None:
     if not (settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY):
         logger.warning("Missing Langfuse keys; skipping OTLP initialization")
         return
-    auth_raw = f"{settings.LANGFUSE_PUBLIC_KEY}:{settings.LANGFUSE_SECRET_KEY}".encode()
+    auth_raw = f"{settings.LANGFUSE_PUBLIC_KEY.get_secret_value()}:{settings.LANGFUSE_SECRET_KEY.get_secret_value()}".encode()
     auth_b64 = base64.b64encode(auth_raw).decode()
     exporter = OTLPSpanExporter(
         endpoint=endpoint,

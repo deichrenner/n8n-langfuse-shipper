@@ -13,7 +13,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any, Optional
 
-from pydantic import Field, ValidationError, field_validator, model_validator
+from pydantic import Field, ValidationError, field_validator, model_validator, SecretStr
 from pydantic_settings import BaseSettings
 from pydantic_settings import SettingsConfigDict as _SettingsConfigDict
 
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     model_config = _SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # Postgres
-    PG_DSN: str = Field(
+    PG_DSN: SecretStr = Field(
         default="", description="PostgreSQL DSN, e.g. postgres://user:pass@host:5432/dbname"
     )
     # Optional n8n-style component vars (used if PG_DSN not directly supplied)
@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     DB_POSTGRESDB_PORT: Optional[int] = 5432
     DB_POSTGRESDB_DATABASE: Optional[str] = None
     DB_POSTGRESDB_USER: Optional[str] = None
-    DB_POSTGRESDB_PASSWORD: Optional[str] = None
+    DB_POSTGRESDB_PASSWORD: Optional[SecretStr] = None
     DB_POSTGRESDB_SCHEMA: Optional[str] = None
     # Mandatory prefix (empty string means none). Must be provided explicitly.
     DB_TABLE_PREFIX: str = Field(
@@ -47,8 +47,8 @@ class Settings(BaseSettings):
 
     # Langfuse / OTLP
     LANGFUSE_HOST: str = Field(default="", description="Base URL for Langfuse host")
-    LANGFUSE_PUBLIC_KEY: str = Field(default="", description="Langfuse public key")
-    LANGFUSE_SECRET_KEY: str = Field(default="", description="Langfuse secret key")
+    LANGFUSE_PUBLIC_KEY: SecretStr = Field(default="", description="Langfuse public key")
+    LANGFUSE_SECRET_KEY: SecretStr = Field(default="", description="Langfuse secret key")
 
     # Logging & runtime behavior
     LOG_LEVEL: str = Field(default="INFO", description="Logging level")
@@ -140,6 +140,12 @@ class Settings(BaseSettings):
             "This is ideally a random or otherwise unique string to allow for deterministic extraction "
             "of the value from arbitrary execution data. E.g. `custom_langfuse_trace_id` would be suitable. "
             "The field value must be set to a valid 16-character hexadecimal string within the n8n workflow."
+        )
+    )
+    SKIP_BROKEN_EXECUTIONS: bool = Field(
+        default=False,
+        description=(
+            "If true, skips workflow executions that cause errors during processing instead of failing the run."
         )
     )
 

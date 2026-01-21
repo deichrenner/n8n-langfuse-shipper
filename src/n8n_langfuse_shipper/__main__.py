@@ -368,97 +368,111 @@ def shipper(
         latest_started: Optional[datetime] = None
 
         async for raw in source.stream(start_after_id=effective_start_after, limit=limit):
-            record = N8nExecutionRecord(
-                id=raw["id"],
-                workflowId=raw["workflowId"],
-                status=raw["status"],
-                startedAt=raw["startedAt"],
-                stoppedAt=raw["stoppedAt"],
-                workflowData=WorkflowData(**raw["workflowData"]),
-                # Attempt to parse full execution data (with runData). Fallback to empty if shape unexpected.
-                data=_build_execution_data(
-                    raw.get("data"),
-                    workflow_data_raw=raw.get("workflowData"),
-                    debug=effective_debug,
-                    attempt_decompress=effective_decompress,
-                    execution_id=raw["id"],
-                ),
-            )
-            if effective_debug and effective_dump_dir:
-                try:
-                    import json
-                    import os as _os
-                    _os.makedirs(effective_dump_dir, exist_ok=True)
-                    dump_path = _os.path.join(effective_dump_dir, f"execution_{record.id}_data.json")
-                    with open(dump_path, "w", encoding="utf-8") as f:
-                        json.dump(raw.get("data"), f, ensure_ascii=False, indent=2)
-                    logging.getLogger(__name__).info("Dumped raw data JSON to %s", dump_path)
-                except Exception as e:
-                    logging.getLogger(__name__).warning("Failed dumping raw data JSON: %s", e)
-            effective_trunc: Optional[int] = (
-                settings.TRUNCATE_FIELD_LEN if truncate_len is None else truncate_len
-            )
-            if effective_trunc == 0:
-                effective_trunc = None  # signal no truncation
-            # Media upload feature path (Langfuse Media API).
-            # Phase order change: we first export spans to obtain OTLP span ids
-            # (observation ids) then run media upload so create_media can link
-            # assets to observations. Tokens patched locally after export; the
-            # OTLP-exported span output may not include tokens (contract
-            # update documented in instructions & README).
-            mapped = None  # for media upload path later
-            if settings.ENABLE_MEDIA_UPLOAD:
-                mapped = map_execution_with_assets(
-                    record,
-                    truncate_limit=effective_trunc,
-                    collect_binaries=True,
-                    filter_ai_only=effective_filter_ai_only,
+            try:
+                record = N8nExecutionRecord(
+                    id=raw["id"],
+                    workflowId=raw["workflowId"],
+                    status=raw["status"],
+                    startedAt=raw["startedAt"],
+                    stoppedAt=raw["stoppedAt"],
+                    workflowData=WorkflowData(**raw["workflowData"]),
+                    # Attempt to parse full execution data (with runData). Fallback to empty if shape unexpected.
+                    data=_build_execution_data(
+                        raw.get("data"),
+                        workflow_data_raw=raw.get("workflowData"),
+                        debug=effective_debug,
+                        attempt_decompress=effective_decompress,
+                        execution_id=raw["id"],
+                    ),
                 )
-                trace = mapped.trace
-            else:
-                trace = map_execution_to_langfuse(
-                    record,
-                    truncate_limit=effective_trunc,
-                    filter_ai_only=effective_filter_ai_only,
+                if effective_debug and effective_dump_dir:
+                    try:
+                        import json
+                        import os as _os
+                        _os.makedirs(effective_dump_dir, exist_ok=True)
+                        dump_path = _os.path.join(effective_dump_dir, f"execution_{record.id}_data.json")
+                        with open(dump_path, "w", encoding="utf-8") as f:
+                            json.dump(raw.get("data"), f, ensure_ascii=False, indent=2)
+                        logging.getLogger(__name__).info("Dumped raw data JSON to %s", dump_path)
+                    except Exception as e:
+                        logging.getLogger(__name__).warning("Failed dumping raw data JSON: %s", e)
+                effective_trunc: Optional[int] = (
+                    settings.TRUNCATE_FIELD_LEN if truncate_len is None else truncate_len
                 )
-            span_count = len(trace.spans)
-            if span_count <= 1:
-                logging.getLogger(__name__).warning(
-                    "Execution %s produced %d span(s); likely missing runData. workflowId=%s", record.id, span_count, record.workflowId
-                )
-            else:
-                logging.getLogger(__name__).debug(
-                    "Execution %s mapped to %d spans", record.id, span_count
-                )
-            export_trace(
-                trace,
-                settings,
-                dry_run=effective_dry_run,
-                langfuse_trace_id_field_name=settings.LANGFUSE_TRACE_ID_FIELD_NAME,
-            )
-            if settings.ENABLE_MEDIA_UPLOAD and mapped is not None:
-                # Now that OTLP span ids are populated, perform media create + upload.
-                try:
-                    patch_and_upload_media(mapped, settings)
-                except Exception as e:  # pragma: no cover - non-fatal path
-                    logging.getLogger(__name__).warning(
-                        "media upload phase failed execution=%s err=%s", record.id, e
+                if effective_trunc == 0:
+                    effective_trunc = None  # signal no truncation
+                # Media upload feature path (Langfuse Media API).
+                # Phase order change: we first export spans to obtain OTLP span ids
+                # (observation ids) then run media upload so create_media can link
+                # assets to observations. Tokens patched locally after export; the
+                # OTLP-exported span output may not include tokens (contract
+                # update documented in instructions & README).
+                mapped = None  # for media upload path later
+                if settings.ENABLE_MEDIA_UPLOAD:
+                    mapped = map_execution_with_assets(
+                        record,
+                        truncate_limit=effective_trunc,
+                        collect_binaries=True,
+                        filter_ai_only=effective_filter_ai_only,
                     )
-            # Track earliest / latest window for user reconciliation with Langfuse UI filters.
-            if earliest_started is None or record.startedAt < earliest_started:
-                earliest_started = record.startedAt
-            if latest_started is None or record.startedAt > latest_started:
-                latest_started = record.startedAt
-            if debug:
-                logging.getLogger(__name__).info(
-                    "Exported execution %s -> trace %s spans=%d startedAt=%s",
-                    record.id,
-                    trace.id,
-                    len(trace.spans),
-                    record.startedAt.isoformat(),
+                    trace = mapped.trace
+                else:
+                    trace = map_execution_to_langfuse(
+                        record,
+                        truncate_limit=effective_trunc,
+                        filter_ai_only=effective_filter_ai_only,
+                    )
+                span_count = len(trace.spans)
+                if span_count <= 1:
+                    logging.getLogger(__name__).warning(
+                        "Execution %s produced %d span(s); likely missing runData. workflowId=%s", record.id, span_count, record.workflowId
+                    )
+                else:
+                    logging.getLogger(__name__).debug(
+                        "Execution %s mapped to %d spans", record.id, span_count
+                    )
+                export_trace(
+                    trace,
+                    settings,
+                    dry_run=effective_dry_run,
+                    langfuse_trace_id_field_name=settings.LANGFUSE_TRACE_ID_FIELD_NAME,
                 )
-            count += 1
-            last_id = int(record.id)
+                if settings.ENABLE_MEDIA_UPLOAD and mapped is not None:
+                    # Now that OTLP span ids are populated, perform media create + upload.
+                    try:
+                        patch_and_upload_media(mapped, settings)
+                    except Exception as e:  # pragma: no cover - non-fatal path
+                        logging.getLogger(__name__).warning(
+                            "media upload phase failed execution=%s err=%s", record.id, e
+                        )
+                # Track earliest / latest window for user reconciliation with Langfuse UI filters.
+                if earliest_started is None or record.startedAt < earliest_started:
+                    earliest_started = record.startedAt
+                if latest_started is None or record.startedAt > latest_started:
+                    latest_started = record.startedAt
+                if debug:
+                    logging.getLogger(__name__).info(
+                        "Exported execution %s -> trace %s spans=%d startedAt=%s",
+                        record.id,
+                        trace.id,
+                        len(trace.spans),
+                        record.startedAt.isoformat(),
+                    )
+                count += 1
+                last_id = int(record.id)
+            except Exception as e:
+                if settings.SKIP_BROKEN_EXECUTIONS:
+                    logging.getLogger(__name__).warning(
+                        "Skipping broken execution id %s: %s", raw.get("id"), e, exc_info=True
+                    )
+                    last_id = int(raw.get("id"))
+                    continue
+                else:
+                    logging.getLogger(__name__).error(
+                        "Failed processing execution id %s: %s", raw.get("id"), e, exc_info=True
+                    )
+                    raise e
+
         if not effective_dry_run and last_id is not None:
             store_checkpoint(cp_path, last_id)
             logging.getLogger(__name__).info(

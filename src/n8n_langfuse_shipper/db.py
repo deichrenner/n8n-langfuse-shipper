@@ -15,6 +15,7 @@ import re
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional
 
+from pydantic import SecretStr
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 psycopg: Any | None
@@ -50,7 +51,7 @@ class ExecutionSource:
 
     def __init__(
         self,
-        dsn: str,
+        dsn: SecretStr,
         batch_size: int = DEFAULT_BATCH_SIZE,
         *,
         schema: Optional[str] = None,
@@ -119,7 +120,7 @@ class ExecutionSource:
             raise RuntimeError("PG_DSN is empty; cannot establish database connection")
         if psycopg is None:  # pragma: no cover
             raise RuntimeError("psycopg not installed in current environment")
-        conn: AsyncConnection = await psycopg.AsyncConnection.connect(self._dsn)
+        conn: AsyncConnection = await psycopg.AsyncConnection.connect(self._dsn.get_secret_value())
         try:
             yield conn
         finally:  # noqa: SIM105 (clarity over compressed form)
